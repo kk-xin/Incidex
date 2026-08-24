@@ -1,0 +1,26 @@
+server:
+  port: 8080 # Java 后端运行在 8080 端口
+
+spring:
+  application:
+    name: backend-spring
+  
+  # 数据库连接配置
+  datasource:
+    url: jdbc:postgresql://localhost:5432/incidex_db
+    username: incidex_user
+    password: incidex_password
+    driver-class-name: org.postgresql.Driver
+
+  # JPA / Hibernate 配置
+  jpa:
+    hibernate:
+      ddl-auto: update # 自动根据 Java 实体类在数据库中创建/更新数据表
+    show-sql: true # 在终端打印执行的 SQL 语句，方便调试
+    properties:
+      hibernate:
+        format_sql: true
+
+# 自定义配置：Python AI Engine 的访问地址
+ai-engine:
+  url: http://localhost:8000/api/v1/triage

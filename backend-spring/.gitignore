@@ -1,0 +1,12 @@
+cat << 'EOF' > backend-spring/.gitignore
+/target/
+!.mvn/wrapper/maven-wrapper.jar
+!target/fallthrough/
+*.class
+
+# IDE 和系统文件
+.mvn/
+.idea/
+*.iml
+.DS_Store
+EOF
