@@ -1,11 +1,13 @@
 package com.incidex.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.incidex.model.Incident;
 import com.incidex.model.TriageRequest;
-import com.incidex.model.TriageResponse;
 import com.incidex.repository.IncidentRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -18,44 +20,50 @@ public class IncidentService {
     private IncidentRepository incidentRepository;
 
     @Value("${ai-engine.url}")
-    private String aiEngineUrl; // 自动读取 application.yml 里的 http://localhost:8000/api/v1/triage
+    private String aiEngineUrl;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper;
 
-    /**
-     * 创建故障工单：调用 Python AI 引擎生成诊断，并存入数据库
-     */
+    public IncidentService() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(5000);
+        factory.setReadTimeout(60000); // 60 秒超时，完美覆盖 CPU 推理时间
+        this.restTemplate = new RestTemplate(factory);
+        this.objectMapper = new ObjectMapper();
+    }
+
     public Incident createIncident(String title, String issueDescription) {
-        // 1. 构造发给 Python AI 引擎的请求体
         TriageRequest requestBody = new TriageRequest(issueDescription);
 
-        String aiSuggestion = "AI 诊断暂时不可用";
+        String aiSuggestion;
         try {
-            // 2. 跨服务 HTTP POST 调用 Python 端 (http://localhost:8000/api/v1/triage)
-            TriageResponse response = restTemplate.postForObject(aiEngineUrl, requestBody, TriageResponse.class);
-            if (response != null && response.getAgentSuggestion() != null) {
-                aiSuggestion = response.getAgentSuggestion();
+            // 1. 用 String.class 接收原始 JSON 字符串，避开强类型反序列化的转义异常
+            String rawJson = restTemplate.postForObject(aiEngineUrl, requestBody, String.class);
+            
+            // 2. 用 Jackson JsonNode 动态提炼 agent_suggestion 字段
+            JsonNode rootNode = objectMapper.readTree(rawJson);
+            if (rootNode.has("agent_suggestion") && !rootNode.get("agent_suggestion").isNull()) {
+                aiSuggestion = rootNode.get("agent_suggestion").asText();
+            } else {
+                aiSuggestion = "AI 诊断成功，但未解析到 agent_suggestion 字段内容。原始响应: " + rawJson;
             }
+
         } catch (Exception e) {
-            // 容错处理：如果 Python AI 引擎没启动或报错，不影响工单基础信息的创建
-            System.err.println("调用 Python AI Engine 失败: " + e.getMessage());
-            aiSuggestion = "AI 诊断调用失败，原因: " + e.getMessage();
+            e.printStackTrace();
+            aiSuggestion = "AI 诊断调用失败, 捕获异常: [" + e.getClass().getName() + "], 报错原因: " + e.getMessage();
         }
 
-        // 3. 构建 Incident 实体对象
+        // 3. 构造实体并保存到数据库
         Incident incident = new Incident();
         incident.setTitle(title);
         incident.setIssueDescription(issueDescription);
-        incident.setAiAnalysis(aiSuggestion); // 填入 Python 返回的 Gemini 诊断报告
+        incident.setAiAnalysis(aiSuggestion);
         incident.setStatus("OPEN");
 
-        // 4. 调用 Repository 保存到 PostgreSQL 数据库并返回
         return incidentRepository.save(incident);
     }
 
-    /**
-     * 查询所有故障工单列表
-     */
     public List<Incident> getAllIncidents() {
         return incidentRepository.findAll();
     }
